@@ -1,3 +1,3 @@
-assert('Ruby Extension Example') do
-  RubyExtension.respond_to? :ruby_method
+assert('AWS') do
+  Object.const_defined?(:AWS) && AWS.const_defined?(:S3)
 end
