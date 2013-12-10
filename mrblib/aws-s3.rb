@@ -29,7 +29,7 @@ end
 module AWS
   class S3
     S3_ENDPOINT = "s3.amazonaws.com"
-    S3_PORT = 80
+    S3_PORT = 443
 
     def initialize(access_key, secret_key)
       @access_key = access_key
@@ -51,7 +51,7 @@ module AWS
       }
 
       req = create_http_request(:get, "", header)
-      http = SimpleHttp.new(host, S3_PORT)
+      http = SimpleHttp.new("https", host, S3_PORT)
       http.request("GET", path, req)
     end
 
@@ -66,7 +66,7 @@ module AWS
       }
 
       req = create_http_request(:put, text, header)
-      http = SimpleHttp.new(host, S3_PORT)
+      http = SimpleHttp.new("https", host, S3_PORT)
       http.request("PUT", path, req)
     end
 
