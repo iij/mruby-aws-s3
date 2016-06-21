@@ -9,7 +9,7 @@ Prerequisites:
 * mrbgems (mruby-uv, mruby-http, mruby-digest, mruby-pack, mruby-simplehttp, mruby-httprequest)
 
 activate GEMs in *build_config.rb*
-    conf.gem :git => 'https://github.com/iij/mruby-aws.git', :branch => 'master'
+    conf.gem :git => 'https://github.com/iij/mruby-aws-s3.git', :branch => 'master'
 
 then, build mruby
     ruby ./minirake
