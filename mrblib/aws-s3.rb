@@ -31,9 +31,10 @@ module AWS
     S3_ENDPOINT = "s3.amazonaws.com"
     S3_PORT = 443
 
-    def initialize(access_key, secret_key)
+    def initialize(access_key, secret_key, security_token = nil)
       @access_key = access_key
       @secret_key = secret_key
+      @security_token = security_token
     end
 
     def set_bucket(bucket_name)
@@ -49,6 +50,7 @@ module AWS
         'Date' => date,
         'Authorization' => "AWS " + @access_key + ":" + sig_encoded
       }
+      header['x-amz-security-token'] = @security_token unless @security_token.nil?
 
       req = create_http_request(:get, "", header)
       http = SimpleHttp.new("https", host, S3_PORT)
@@ -64,6 +66,7 @@ module AWS
         'Date' => date,
         'Authorization' => "AWS " + @access_key + ":" + sig_encoded
       }
+      header['x-amz-security-token'] = @security_token unless @security_token.nil?
 
       req = create_http_request(:put, text, header)
       http = SimpleHttp.new("https", host, S3_PORT)
@@ -116,6 +119,7 @@ module AWS
         sign_str += "GET\n\n\n"
       end
       sign_str += date + "\n"
+      sign_str += "x-amz-security-token:" + @security_token + "\n" unless @security_token.nil?
       sign_str += "/" + @bucket_name + path
 
       digest = Digest::HMAC.digest(sign_str, @secret_key, Digest::SHA1)
