@@ -1,40 +1,15 @@
-
-class Time
-  def utc_offset
-    9 * 60 * 60 # JST
-  end
-  def rfc2822
-    sprintf('%s, %02d %s %0*d %02d:%02d:%02d ',
-      RFC2822_DAY_NAME[wday],
-      day, RFC2822_MONTH_NAME[mon-1], year < 0 ? 5 : 4, year,
-      hour, min, sec) +
-    if utc?
-      '-0000'
-    else
-      off = utc_offset
-      sign = off < 0 ? '-' : '+'
-      sprintf('%s%02d%02d', sign, (off.abs / 60) / 60, (off.abs / 60) % 60)
-    end
-  end
-
-  RFC2822_DAY_NAME = [
-    'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'
-  ]
-  RFC2822_MONTH_NAME = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-  ]
-end
-
 module AWS
   class S3
-    S3_ENDPOINT = "s3.amazonaws.com"
-    S3_PORT = 443
+    S3_ENDPOINT = ENV["MRB_AWS_S3_ENDPOINT"] || "https://s3.amazonaws.com"
+    S3_ENDPOINT_PARSED = URI.parse(S3_ENDPOINT)
+    EMPTY_STRING_SHA256 = Digest::SHA256::hexdigest('')
 
-    def initialize(access_key, secret_key, security_token = nil)
-      @access_key = access_key
-      @secret_key = secret_key
+    def initialize(access_key, secret_key, security_token = nil, region = nil)
+      @access_key = access_key || ENV['AWS_ACCESS_KEY_ID']
+      @secret_key = secret_key || ENV['AWS_SECRET_ACCESS_KEY']
       @security_token = security_token
+      @region = region || ENV["AWS_DEFAULT_REGION"] || 'us-east-1'
+      @http = SimpleHttp.new(S3_ENDPOINT_PARSED.schema, S3_ENDPOINT_PARSED.host, S3_ENDPOINT_PARSED.port)
     end
 
     def set_bucket(bucket_name)
@@ -42,88 +17,71 @@ module AWS
     end
 
     def download(path)
-      host = @bucket_name + "." + S3_ENDPOINT
-      date = Time.now.rfc2822
-      sig_encoded = sign(:get, date, path)
-      header = {
-        'Host' => host,
-        'Date' => date,
-        'Authorization' => "AWS " + @access_key + ":" + sig_encoded
+      headers = {
+        'Host' => S3_ENDPOINT_PARSED.host,
+        'Body' => '',
+        'x-amz-content-sha256' => EMPTY_STRING_SHA256,
       }
-      header['x-amz-security-token'] = @security_token unless @security_token.nil?
-
-      req = create_http_request(:get, "", header)
-      http = SimpleHttp.new("https", host, S3_PORT)
-      http.request("GET", path, req)
+      calculate_signature('GET', path, headers)
     end
 
     def upload(path, text)
-      host = @bucket_name + "." + S3_ENDPOINT
-      date = Time.now.rfc2822
-      sig_encoded = sign(:put, date, path)
-      header = {
-        'Host' => host,
-        'Date' => date,
-        'Authorization' => "AWS " + @access_key + ":" + sig_encoded
+      headers = {
+        'Host' => S3_ENDPOINT_PARSED.host,
+        'Body' => text,
       }
-      header['x-amz-security-token'] = @security_token unless @security_token.nil?
-
-      req = create_http_request(:put, text, header)
-      http = SimpleHttp.new("https", host, S3_PORT)
-      http.request("PUT", path, req)
+      calculate_signature('PUT', path, headers)
     end
 
     # private
-    def remove_cr(str)
-      rval = ""
-      str.each_char do |c|
-        next if c == "\n"
-        rval += c
+    def calculate_signature(method, path, headers)
+      method = method.upcase
+      time = Time.now.utc
+      path = "/#{path}" unless path.start_with? '/'
+      path = "/#{@bucket_name}#{path}"
+
+      headers['x-amz-content-sha256'] = Digest::SHA256.hexdigest(headers['Body']) unless
+        headers['x-amz-content-sha256']
+      headers['x-amz-security-token'] = @security_token if @security_token
+      headers['Date'] = headers['x-amz-date'] = time.strftime("%Y%m%dT%H%M%SZ")
+      if method == 'PUT'
+        headers['Content-Length'] = headers['Body'].bytesize
+        headers['Content-Encoding'] = 'aws-chunked'
       end
-      rval
-    end
+      headers['Accept'] = SimpleHttp::DEFAULT_ACCEPT
+      headers['Connection'] = 'close'
 
-    def encode_parameters(params, delimiter = '&', quote = nil)
-      if params.is_a?(Hash)
-        params = params.map do |key, value|
-          sprintf("%s=%s%s%s", escape(key), quote, escape(value), quote)
-        end
-      else
-        params = params.map { |value| escape(value) }
+      canon_req = "#{method}\n"
+      canon_req += "#{URI::encode(path).gsub('%2F', '/')}\n"
+      canon_req += "\n" # queries
+      header_keys = []
+      headers.keys.sort.each do |k|
+        next if k == 'Body'
+        header_keys.push(k.downcase)
+        canon_req += "#{header_keys.last}:#{headers[k].to_s.strip}\n"
       end
-      delimiter ? params.join(delimiter) : params
-    end
+      canon_req += "\n#{header_keys.join(";")}"
+      canon_req += "\n#{headers['x-amz-content-sha256']}"
 
-    def create_http_request(method, body, header)
-      request = {}
-      request['User-Agent'] = "Mozilla/5.0"
-      if method == :post or method == :put
-        request["body"] = body.is_a?(Hash) ? encode_parameters(body) : body.to_s
-        request["Content-Type"] = "text/plain"
-        request["Content-Length"] = (request["body"] || '').length
+      scope = [time.strftime('%Y%m%d'), @region, 's3', 'aws4_request']
+
+      str_to_sign = "AWS4-HMAC-SHA256\n#{headers['x-amz-date']}\n#{scope.join '/'}"
+      str_to_sign += "\n#{Digest::SHA256.hexdigest(canon_req)}"
+
+      signing_key = "AWS4#{@secret_key}"
+      scope.each do |v|
+        signing_key = Digest::HMAC.digest(v, signing_key, Digest::SHA256)
       end
-      request.merge(header)
-    end
 
-    def base64(value)
-      remove_cr([value].pack('m'))
-    end
+      sign = Digest::HMAC.hexdigest(str_to_sign, signing_key, Digest::SHA256)
 
-    def sign(proto, date, path)
-      sign_str = String.new
-      case proto
-      when :put
-        sign_str += "PUT\n\n"
-        sign_str += "text/plain\n"
-      when :get
-        sign_str += "GET\n\n\n"
-      end
-      sign_str += date + "\n"
-      sign_str += "x-amz-security-token:" + @security_token + "\n" unless @security_token.nil?
-      sign_str += "/" + @bucket_name + path
+      headers['Authorization'] = "AWS4-HMAC-SHA256 Credential=#{@access_key}/#{scope.join '/'}"
+      headers['Authorization'] += ",SignedHeaders=#{header_keys.join ';'}"
+      headers['Authorization'] += ",Signature=#{sign}"
 
-      digest = Digest::HMAC.digest(sign_str, @secret_key, Digest::SHA1)
-      remove_cr(base64(digest))
+      ret = @http.request method, path, headers
+      raise "S3 request error: #{ret.body}" if ret.code != 200
+      ret.body
     end
   end
 end
