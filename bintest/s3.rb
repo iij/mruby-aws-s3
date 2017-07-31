@@ -14,10 +14,10 @@ assert 'minio test' do
   # `aws --endpoint-url #{ENV['MRB_AWS_S3_ENDPOINT']} s3 ls test`
   # `aws --endpoint-url #{ENV['MRB_AWS_S3_ENDPOINT']} s3 ls`
 
-  uploader = "s3 = AWS::S3.new(nil, nil); s3.set_bucket 'test'; print s3.upload '/test.txt', 'test'"
-  assert_equal '', `#{cmd 'mruby'} -e "#{uploader}"`
+  uploader = "s3 = AWS::S3.new(nil, nil); s3.set_bucket 'test'; print s3.upload('/test.txt', 'test').code"
+  assert_equal '200', `#{cmd 'mruby'} -e "#{uploader}"`
 
-  downloader = "s3 = AWS::S3.new(nil, nil); s3.set_bucket 'test'; print s3.download '/test.txt'"
+  downloader = "s3 = AWS::S3.new(nil, nil); s3.set_bucket 'test'; print s3.download('/test.txt').body"
   assert_equal 'test', `#{cmd 'mruby'} -e "#{downloader}"`
 
   `docker rm -f test_minio`

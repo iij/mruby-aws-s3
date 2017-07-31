@@ -79,9 +79,7 @@ module AWS
       headers['Authorization'] += ",SignedHeaders=#{header_keys.join ';'}"
       headers['Authorization'] += ",Signature=#{sign}"
 
-      ret = @http.request method, path, headers
-      raise "S3 request error: #{ret.body}" if ret.code != 200
-      ret.body
+      @http.request method, path, headers
     end
   end
 end
