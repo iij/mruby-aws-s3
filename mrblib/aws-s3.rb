@@ -1,15 +1,15 @@
 module AWS
   class S3
-    S3_ENDPOINT = ENV["MRB_AWS_S3_ENDPOINT"] || "https://s3.amazonaws.com"
-    S3_ENDPOINT_PARSED = URI.parse(S3_ENDPOINT)
     EMPTY_STRING_SHA256 = Digest::SHA256::hexdigest('')
 
-    def initialize(access_key, secret_key, security_token = nil, region = nil)
+    def initialize(access_key, secret_key, security_token = nil, region = nil, endpoint = nil)
       @access_key = access_key || ENV['AWS_ACCESS_KEY_ID']
       @secret_key = secret_key || ENV['AWS_SECRET_ACCESS_KEY']
       @security_token = security_token
       @region = region || ENV["AWS_DEFAULT_REGION"] || 'us-east-1'
-      @http = SimpleHttp.new(S3_ENDPOINT_PARSED.schema, S3_ENDPOINT_PARSED.host, S3_ENDPOINT_PARSED.port)
+      @s3_endpoint = ENV["MRB_AWS_S3_ENDPOINT"] || "https://s3.amazonaws.com"
+      @s3_endpoint = HTTP::Parser.new.parse_url(@s3_endpoint)
+      @http = SimpleHttp.new(@s3_endpoint.schema, @s3_endpoint.host, @s3_endpoint.port)
     end
 
     def set_bucket(bucket_name)
@@ -18,7 +18,7 @@ module AWS
 
     def download(path)
       headers = {
-        'Host' => S3_ENDPOINT_PARSED.host,
+        'Host' => @s3_endpoint.host,
         'Body' => '',
         'x-amz-content-sha256' => EMPTY_STRING_SHA256,
       }
@@ -27,7 +27,7 @@ module AWS
 
     def upload(path, text)
       headers = {
-        'Host' => S3_ENDPOINT_PARSED.host,
+        'Host' => @s3_endpoint.host,
         'Body' => text,
       }
       calculate_signature('PUT', path, headers)
@@ -52,7 +52,7 @@ module AWS
       headers['Connection'] = 'close'
 
       canon_req = "#{method}\n"
-      canon_req += "#{URI::encode(path).gsub('%2F', '/')}\n"
+      canon_req += "#{HTTP::URL::encode(path).gsub('%2F', '/')}\n"
       canon_req += "\n" # queries
       header_keys = []
       headers.keys.sort.each do |k|
