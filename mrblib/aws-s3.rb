@@ -1,3 +1,9 @@
+class Module
+  def self.const_get(const)
+    Object.const_get(const)
+  end
+end
+
 module AWS
   class S3
     EMPTY_STRING_SHA256 = Digest::SHA256::hexdigest('')
